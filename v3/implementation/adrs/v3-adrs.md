@@ -11,16 +11,16 @@
 
 | ADR | Title | Status | Date |
 |-----|-------|--------|------|
-| ADR-001 | Adopt agentic-flow as Core Foundation | Proposed | 2026-01-03 |
-| ADR-002 | Implement Domain-Driven Design Structure | Proposed | 2026-01-03 |
-| ADR-003 | Single Coordination Engine | Proposed | 2026-01-03 |
-| ADR-004 | Plugin-Based Architecture | Proposed | 2026-01-03 |
-| ADR-005 | MCP-First API Design | Proposed | 2026-01-03 |
-| ADR-006 | Unified Memory Service | Proposed | 2026-01-03 |
-| ADR-007 | Event Sourcing for State Changes | Proposed | 2026-01-03 |
-| ADR-008 | Vitest Over Jest | Proposed | 2026-01-03 |
-| ADR-009 | Hybrid Memory Backend as Default | Proposed | 2026-01-03 |
-| ADR-010 | Remove Deno Support | Proposed | 2026-01-03 |
+| ADR-001 | Adopt agentic-flow as Core Foundation | In Progress | 2026-01-03 |
+| ADR-002 | Implement Domain-Driven Design Structure | **Implemented** ✅ | 2026-01-03 |
+| ADR-003 | Single Coordination Engine | **Implemented** ✅ | 2026-01-03 |
+| ADR-004 | Plugin-Based Architecture | **Implemented** ✅ | 2026-01-03 |
+| ADR-005 | MCP-First API Design | **Implemented** ✅ | 2026-01-03 |
+| ADR-006 | Unified Memory Service | **Implemented** ✅ | 2026-01-03 |
+| ADR-007 | Event Sourcing for State Changes | In Progress | 2026-01-03 |
+| ADR-008 | Vitest Over Jest | **Implemented** ✅ | 2026-01-03 |
+| ADR-009 | Hybrid Memory Backend as Default | **Implemented** ✅ | 2026-01-03 |
+| ADR-010 | Remove Deno Support | **Implemented** ✅ | 2026-01-03 |
 | ADR-011 | LLM Provider System | **Implemented** ✅ | 2026-01-05 |
 | ADR-012 | MCP Security Features | In Progress | 2026-01-05 |
 | ADR-013 | Core Security Module | **Implemented** ✅ | 2026-01-05 |
