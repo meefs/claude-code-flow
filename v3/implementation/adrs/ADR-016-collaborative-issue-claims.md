@@ -1,7 +1,8 @@
 # ADR-016: Collaborative Issue Claims for Human-Agent Workflows
 
-**Status:** Proposed
+**Status:** ✅ Complete
 **Date:** 2026-01-06
+**Completion Date:** 2026-01-07
 
 ## Context
 
