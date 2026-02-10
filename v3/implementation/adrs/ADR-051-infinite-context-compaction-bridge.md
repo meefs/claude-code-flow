@@ -759,16 +759,16 @@ All capabilities confirmed working (2026-02-10):
 
 ## Future Enhancements
 
-1. **Compaction summary capture**: After compaction, store Claude's own summary as a
-   high-confidence semantic entry alongside our chunk-level detail
+1. **Smarter text pruning**: Use extractive summarization instead of simple truncation
+   for old text blocks — preserve key decisions and reasoning
 2. **Cross-session search MCP tool**: Expose `transcript-archive` search as an MCP
    tool so Claude can explicitly query past conversations
 3. **MemoryGraph integration**: Add reference edges between sequential chunks for
    PageRank-aware retrieval (ADR-049)
-4. **Real ONNX embeddings**: Replace hash embeddings with ONNX-based embeddings for
-   true semantic similarity search (transparent upgrade)
-5. **Adaptive retention**: Dynamically adjust retention period based on storage usage
-   and access patterns
+4. **Adaptive pruning thresholds**: Dynamically adjust `TEXT_PRUNE_KEEP` and
+   `TEXT_PRUNE_THRESHOLD` based on conversation complexity and context growth rate
+5. **Upstream contribution**: Propose text pruning as a native Claude Code feature
+   to eliminate the need for SDK patching
 
 ## Implementation Details
 
