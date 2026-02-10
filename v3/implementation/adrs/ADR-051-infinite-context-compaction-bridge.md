@@ -315,6 +315,125 @@ function createHashEmbedding(text, dimensions = 768) {
 }
 ```
 
+## Context Autopilot
+
+The Context Autopilot is a real-time context window management system that prevents
+Claude Code's automatic compaction from ever firing. Instead of letting the context
+window fill up and trigger lossy compaction, the autopilot tracks usage and optimizes
+proactively.
+
+### How It Works
+
+```
+Every User Prompt
+       │
+       ▼
+┌─────────────────────────────┐
+│  estimateContextTokens()    │  Read API usage from transcript JSONL
+│  input_tokens +             │  (actual Claude API token counts, not
+│  cache_read_input_tokens +  │   character estimates)
+│  cache_creation_input_tokens│
+└─────────────┬───────────────┘
+              │
+              ▼
+┌─────────────────────────────┐
+│  Calculate percentage       │  tokens / CONTEXT_WINDOW_TOKENS (200K)
+│  Update autopilot-state.json│  Persistent across hook invocations
+│  Track growth history       │  Last 50 data points for trend analysis
+└─────────────┬───────────────┘
+              │
+    ┌─────────┼──────────┐
+    ▼         ▼          ▼
+  <70%     70-85%      85%+
+   OK      WARNING    OPTIMIZE
+   │         │          │
+   │         │     Prune stale archive entries
+   │         │     Keep responses concise
+   │         │          │
+   └─────────┴──────────┘
+              │
+              ▼
+┌─────────────────────────────┐
+│  Inject report into context │  [ContextAutopilot] [===----] 43% ...
+│  via additionalContext       │  Includes: bar, %, tokens, trend
+└─────────────────────────────┘
+```
+
+### Token Estimation (API-Accurate)
+
+The autopilot reads **actual API usage data** from the transcript JSONL, not character
+estimates. Each assistant message in the transcript contains:
+
+```json
+{
+  "message": {
+    "usage": {
+      "input_tokens": 45000,
+      "cache_read_input_tokens": 30000,
+      "cache_creation_input_tokens": 5000
+    }
+  }
+}
+```
+
+Total context = `input_tokens + cache_read_input_tokens + cache_creation_input_tokens`
+
+This matches what Claude Code reports as context usage (e.g., "Context left until
+auto-compact: 8%" corresponds to ~92% usage). Falls back to character-based estimation
+(`chars / 3.5`) only when API usage data is unavailable.
+
+### Compaction Control
+
+| Trigger | Autopilot Behavior | Exit Code |
+|---------|-------------------|-----------|
+| `auto` (context full) | **BLOCKED** — archives turns, returns exit 2 | 2 |
+| `manual` (`/compact`) | **ALLOWED** — archives turns, resets autopilot state, proceeds | 0 |
+
+The shell wrapper in settings.json preserves exit code 2:
+```bash
+/bin/bash -c 'node ... pre-compact 2>/dev/null; RC=$?; if [ $RC -eq 2 ]; then exit 2; fi; exit 0'
+```
+
+This ensures hook crashes (exit 1) don't accidentally block compaction, while
+intentional blocking (exit 2) always propagates to Claude Code.
+
+### Statusline Integration (ADR-052)
+
+The autopilot state is read by the statusline script to display real-time metrics:
+
+```
+🛡️  43% 86.7K ⊘    (autopilot active, 43% used, 86.7K tokens, no prune cycles)
+🛡️  72% 144K ⊘     (warning zone, yellow color)
+🛡️  88% 176K ⟳2    (prune zone, red, 2 optimization cycles completed)
+```
+
+### Optimization Phases
+
+| Phase | Threshold | Actions |
+|-------|-----------|---------|
+| **OK** | <70% | Normal operation, track growth trend |
+| **Warning** | 70-85% | Flag approaching limit, archive aggressively |
+| **Optimize** | 85%+ | Prune stale archive entries, increment prune counter, keep responses concise |
+
+### Autopilot State Persistence
+
+State is persisted to `.claude-flow/data/autopilot-state.json`:
+
+```json
+{
+  "sessionId": "f1bd5b59-...",
+  "lastTokenEstimate": 86736,
+  "lastPercentage": 0.434,
+  "pruneCount": 0,
+  "warningIssued": false,
+  "lastCheck": 1770750408022,
+  "history": [
+    { "ts": 1770749467007, "tokens": 45430, "pct": 0.227, "turns": 48 },
+    { "ts": 1770750408022, "tokens": 86736, "pct": 0.434, "turns": 53 }
+  ]
+}
+```
+
 ## Performance Budget
 
 | Operation | Time Budget | Actual |
