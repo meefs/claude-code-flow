@@ -122,6 +122,13 @@ jobs:
         # that would break neural-router.ts at runtime.
         run: node scripts/check-metaharness-compat.mjs
 
+      - name: Parallel-pipeline e2e integration test (ADR-150 iter 13)
+        # Exercises recorder TS module ↔ JSONL ↔ analyzer composition.
+        # 25 assertions including the exact 3 thresholds from
+        # ADR-150 review-round-1, plus --strict semantics for both
+        # promotable and non-promotable paths.
+        run: node plugins/ruflo-metaharness/scripts/test-parallel-pipeline.mjs
+
   eject-dryrun:
     # ADR-150 Phase 2 — verify `ruflo eject` dry-run produces a valid
     # plan against the ruflo repo itself, AND that the safety gate

@@ -170,6 +170,23 @@ if (!od.metaharness) { console.error('missing metaharness in optionalDependencie
 if (j.dependencies && j.dependencies.metaharness) { console.error('metaharness leaked into dependencies'); process.exit(1); }
 " 2>/dev/null && ok || bad "ruflo wrapper missing metaharness optionalDep"
 
+step "17g. parallel-pipeline e2e integration test (ADR-150 — iter 13)"
+F="$ROOT/scripts/test-parallel-pipeline.mjs"
+miss=""
+[[ -x "$F" ]] || miss="$miss not-executable"
+node --check "$F" 2>/dev/null || miss="$miss syntax-error"
+# Exercises all three layers (recorder ↔ JSONL ↔ analyzer)
+grep -q "router-parallel-recorder.ts" "$F" || miss="$miss no-recorder-coverage"
+grep -q "router-parallel-analyze.mjs" "$F" || miss="$miss no-analyzer-coverage"
+# Asserts the 3 thresholds from ADR-150 review-round-1 are EXACTLY those
+grep -q "qualityThresholdPct === 2" "$F" || miss="$miss no-quality-threshold-assertion"
+grep -q "usdThresholdPct === 1" "$F" || miss="$miss no-cost-threshold-assertion"
+grep -q "latencyThresholdPct === 5" "$F" || miss="$miss no-latency-threshold-assertion"
+# Both promotable + non-promotable paths exercised
+grep -q "promotable.*true\|verdict.promotable === true" "$F" || miss="$miss no-promotable-assertion"
+grep -q "exits 1\|status === 1" "$F" || miss="$miss no-non-promotable-assertion"
+[[ -z "$miss" ]] && ok || bad "$miss"
+
 step "17f. model-router.ts wires recordPair() (ADR-150 last-mile, iter 12)"
 F="$ROOT/../../v3/@claude-flow/cli/src/ruvector/model-router.ts"
 miss=""
