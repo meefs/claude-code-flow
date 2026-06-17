@@ -76,7 +76,11 @@ function main() {
   };
 
   if (ARGS.format === 'json') {
-    console.log(JSON.stringify({ ...payload, durationMs: r.durationMs, alert }, null, 2));
+    // iter 112 — generatedAt for consistency with other --format json outputs
+    console.log(JSON.stringify({
+      ...payload, durationMs: r.durationMs, alert,
+      generatedAt: new Date().toISOString(),
+    }, null, 2));
   } else {
     console.log(`# harness mcp-scan — ${ARGS.path}`);
     console.log('');

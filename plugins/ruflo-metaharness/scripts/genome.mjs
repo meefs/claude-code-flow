@@ -35,7 +35,9 @@ function main() {
     if (r.stderr) console.error(r.stderr.slice(0, 400));
     process.exit(2);
   }
-  const payload = { ...r.json, path: ARGS.path, durationMs: r.durationMs };
+  // iter 112 — generatedAt for consistency with other --format json outputs
+  const payload = { ...r.json, path: ARGS.path, durationMs: r.durationMs,
+    generatedAt: new Date().toISOString() };
 
   if (ARGS.alertRiskAbove !== null) {
     if (!isFinite(ARGS.alertRiskAbove)) {

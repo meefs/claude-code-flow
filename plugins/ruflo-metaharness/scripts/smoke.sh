@@ -191,6 +191,48 @@ grep -q "execCli(\[\s*'-y'\s*,\s*'metaharness@latest'" "$F" 2>/dev/null || \
 grep -q "cwd: opts" "$F" || miss="$miss no-cwd-passthrough"
 [[ -z "$miss" ]] && ok || bad "$miss"
 
+step "17z75. all scripts emit generatedAt timestamp in --format json (iter 112)"
+miss=""
+# Each --format json output should include a `generatedAt` ISO timestamp
+# for downstream observability (when was this audit run?). Exceptions:
+#   - oia-audit uses startedAt/finishedAt (multi-step composite, richer)
+#   - bench-* uses generatedAt (already)
+# Iter 112 fixed genome.mjs + mcp-scan.mjs to include generatedAt.
+TMP=$(mktemp -d)
+cat > "$TMP/fixA.json" <<'JSON'
+{"score":{"harnessFit":80,"recommendedMode":"CLI"},"genome":{"repo_type":"x","agent_topology":["a"]}}
+JSON
+cat > "$TMP/fixB.json" <<'JSON'
+{"composite":{"worst":"clean"},"components":{"mcpScan":{"json":{"findings":[]}}},"fingerprint":{"score":{"harnessFit":80},"genome":{"agent_topology":["a"]}}}
+JSON
+# bash 3.2 (macOS) lacks associative arrays. Use the pipe-delimited list
+# pattern from iter-88.
+SCRIPT_INV=(
+  "score|--path . --format json"
+  "genome|--path . --format json"
+  "mcp-scan|--path . --format json"
+  "threat-model|--path . --format json"
+  "audit-list|--format json"
+  "audit-trend|--baseline $TMP/fixB.json --current $TMP/fixB.json --format json"
+  "similarity|--a $TMP/fixA.json --b $TMP/fixA.json --format json"
+  "bench-similarity|--iters 500 --format json"
+  "bench-parse-mcp-scan|--iters 500 --format json"
+)
+for entry in "${SCRIPT_INV[@]}"; do
+  name="${entry%%|*}"
+  args="${entry##*|}"
+  OUT=$(node "$ROOT/scripts/${name}.mjs" $args 2>/dev/null)
+  echo "$OUT" | python3 -c "
+import json, sys, re
+m = re.search(r'\{[\s\S]*\}', sys.stdin.read())
+d = json.loads(m.group()) if m else {}
+ts = d.get('generatedAt')
+sys.exit(0 if ts and len(str(ts)) >= 20 else 1)
+" 2>/dev/null || miss="$miss ${name}-no-generatedAt"
+done
+rm -rf "$TMP"
+[[ -z "$miss" ]] && ok || bad "$miss"
+
 step "17z74. metaharness pin versions consistent across all 3 package.json (iter 111)"
 miss=""
 # Each of the 3 package.json files pins metaharness/@metaharness/*
