@@ -17,6 +17,61 @@ import { validateIdentifier, validateText } from './validate-input.js';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
+/**
+ * ADR-176/177: an adopted+applied proven-config champion supplies the retrieval
+ * defaults (`.claude-flow/harness-active-policy.json` → params). Read it once,
+ * cached with a short TTL, fully fail-safe (any error → {} → hardcoded defaults).
+ * A caller's explicit param always still wins over the champion.
+ */
+/**
+ * Corpus-stats cache (perf): tokenized subject/body docs + BM25 corpus stats
+ * depend ONLY on the stored patterns, not the query or retrieval config — yet
+ * were rebuilt on every hybrid search (O(all docs) per call). Memoize them keyed
+ * by a cheap store fingerprint (count + id + name/content lengths). This makes
+ * repeated searches — e.g. the flywheel scoring many configs over a fixed store —
+ * iterate in reasonable time, and speeds up every hybrid search. Invalidates when
+ * the store changes size or a doc's length changes.
+ */
+interface CorpusStatsEntry { fp: string; subjectDocs: string[][]; bodyDocs: string[][]; subjectStats: unknown; bodyStats: unknown }
+let _corpusStatsCache: CorpusStatsEntry | null = null;
+// (query, store) → embedding + cosine cache. Small LRU (not size-1): the flywheel
+// scores many configs across several queries in interleaved order, so a size-1
+// cache would thrash. Cap keeps memory bounded; eviction is oldest-first.
+const _cosineCache = new Map<string, { queryEmbedding: number[]; cosineArr: number[] }>();
+const _COSINE_CACHE_MAX = 128;
+function _cosineCacheGet(key: string): { queryEmbedding: number[]; cosineArr: number[] } | undefined {
+  const v = _cosineCache.get(key);
+  if (v) { _cosineCache.delete(key); _cosineCache.set(key, v); } // LRU touch
+  return v;
+}
+function _cosineCacheSet(key: string, v: { queryEmbedding: number[]; cosineArr: number[] }): void {
+  _cosineCache.set(key, v);
+  if (_cosineCache.size > _COSINE_CACHE_MAX) _cosineCache.delete(_cosineCache.keys().next().value as string);
+}
+function corpusFingerprint(patterns: Array<{ id: string; name?: string; content?: string }>): string {
+  let h = 2166136261 >>> 0;
+  for (const p of patterns) {
+    const s = `${p.id}|${p.name?.length ?? 0}|${p.content?.length ?? 0}`;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  }
+  return `${patterns.length}:${h.toString(16)}`;
+}
+
+let _champCache: { at: number; params: Record<string, unknown> } | null = null;
+function activeChampionParams(): Record<string, unknown> {
+  try {
+    if (_champCache && Date.now() - _champCache.at < 30_000) return _champCache.params;
+    const p = join(getProjectCwd(), '.claude-flow', 'harness-active-policy.json');
+    let params: Record<string, unknown> = {};
+    if (existsSync(p)) {
+      const active = JSON.parse(readFileSync(p, 'utf-8'));
+      if (active && !active.rolledBack && active.params && typeof active.params === 'object') params = active.params;
+    }
+    _champCache = { at: Date.now(), params };
+    return params;
+  } catch { return {}; }
+}
+
 // Real embeddings — resolved LAZILY on first use.
 // Perf (measured 2026-07): the previous top-level-await version of this block
 // ran `await import('ruvector')` + `initOnnxEmbedder()` + a probe embed at
@@ -194,6 +249,17 @@ function loadNeuralStore(): NeuralStore {
     // Return empty store
   }
   return { models: {}, patterns: {}, version: '3.0.0' };
+}
+
+/**
+ * ADR-176 flywheel: expose the stored patterns (id/name/content) so the
+ * self-optimizing loop can harvest a benchmark corpus from real usage. Additive,
+ * read-only, never throws.
+ */
+export function getStorePatterns(): Array<{ id: string; name: string; content?: string }> {
+  try {
+    return Object.values(loadNeuralStore().patterns ?? {}).map((p) => ({ id: p.id, name: p.name, content: p.content }));
+  } catch { return []; }
 }
 
 function saveNeuralStore(store: NeuralStore): void {
@@ -647,17 +713,31 @@ export const neuralTools: MCPTool[] = [
         // sub-params than non-rerank (the cross-encoder adds semantic depth,
         // so the hybrid stage can be more keyword-focused). nDCG@3 0.900 →
         // 0.963 on rerank just by switching sw 2.0 → 3.0 in the hybrid stage.
-        const alpha = Number(input.alpha ?? 0.5);
-        const mmrLambda = Number(input.mmrLambda ?? 0.7);
+        // Champion-provided defaults (ADR-176/177): explicit input wins, then the
+        // adopted proven-config champion, then the hardcoded ADR-082 defaults.
+        const champ = activeChampionParams();
+        const alpha = Number(input.alpha ?? champ.alpha ?? 0.5);
+        const mmrLambda = Number(input.mmrLambda ?? champ.mmrLambda ?? 0.7);
 
         const { tokenize, buildCorpusStats, hybridScores, mmrRerank, multiFieldBM25, typePenalty } =
           await import('../memory/hybrid-retrieval.js');
 
-        const queryEmbedding = await generateEmbedding(query, 384);
         const patterns = Object.values(store.patterns);
 
-        // Compute cosine for every pattern (this is what the old path did).
-        const cosineArr = patterns.map((p) => cosineSimilarity(queryEmbedding, p.embedding));
+        // Query embedding + cosine array depend only on (query, store) — NOT the
+        // retrieval config. Cache them so scoring many configs for one query
+        // (the flywheel's access pattern) embeds + cosines once, not per config.
+        const _cosKey = `${corpusFingerprint(patterns)}::${query}`;
+        let queryEmbedding: number[], cosineArr: number[];
+        const _hit = _cosineCacheGet(_cosKey);
+        if (_hit) {
+          queryEmbedding = _hit.queryEmbedding;
+          cosineArr = _hit.cosineArr;
+        } else {
+          queryEmbedding = await generateEmbedding(query, 384);
+          cosineArr = patterns.map((p) => cosineSimilarity(queryEmbedding, p.embedding));
+          _cosineCacheSet(_cosKey, { queryEmbedding, cosineArr });
+        }
 
         if (mode === 'cosine') {
           const ranked = patterns
@@ -679,23 +759,34 @@ export const neuralTools: MCPTool[] = [
         // Hybrid path — multi-field BM25 (subject 3×, body 1×) + type penalty
         // for meta-commits (release bumps / merges) per ADR-079. Falls back
         // to single-field BM25 when no content is stored.
-        const subjectDocs = patterns.map((p) => tokenize(p.name ?? ''));
-        const bodyDocs = patterns.map((p) => {
-          // Body is content minus the subject — if content starts with name,
-          // strip it; otherwise use full content (with name removed if duplicated).
-          const c = p.content ?? '';
-          const n = p.name ?? '';
-          return tokenize(c.startsWith(n) ? c.slice(n.length) : c);
-        });
-        const subjectStats = buildCorpusStats(subjectDocs);
-        const bodyStats = buildCorpusStats(bodyDocs);
+        // Cache the (config-independent) tokenized docs + BM25 stats by store fingerprint.
+        const _fp = corpusFingerprint(patterns);
+        let subjectDocs: string[][], bodyDocs: string[][], subjectStats: ReturnType<typeof buildCorpusStats>, bodyStats: ReturnType<typeof buildCorpusStats>;
+        if (_corpusStatsCache && _corpusStatsCache.fp === _fp) {
+          subjectDocs = _corpusStatsCache.subjectDocs;
+          bodyDocs = _corpusStatsCache.bodyDocs;
+          subjectStats = _corpusStatsCache.subjectStats as ReturnType<typeof buildCorpusStats>;
+          bodyStats = _corpusStatsCache.bodyStats as ReturnType<typeof buildCorpusStats>;
+        } else {
+          subjectDocs = patterns.map((p) => tokenize(p.name ?? ''));
+          bodyDocs = patterns.map((p) => {
+            // Body is content minus the subject — if content starts with name,
+            // strip it; otherwise use full content (with name removed if duplicated).
+            const c = p.content ?? '';
+            const n = p.name ?? '';
+            return tokenize(c.startsWith(n) ? c.slice(n.length) : c);
+          });
+          subjectStats = buildCorpusStats(subjectDocs);
+          bodyStats = buildCorpusStats(bodyDocs);
+          _corpusStatsCache = { fp: _fp, subjectDocs, bodyDocs, subjectStats, bodyStats };
+        }
         const queryTokens = tokenize(query);
         // ADR-082: subjectWeight 3.0 → 2.0 from grid (sw=2 dominates at hybrid-only).
         // ADR-083 joint grid: when rerank is on, the cross-encoder handles
         // semantic understanding, so the hybrid stage can be MORE
         // subject-focused (sw=3) — recovers nDCG@3 0.963.
-        const subjectWeight = Number(input.subjectWeight ?? (useRerank ? 3.0 : 2.0));
-        const bodyWeight = Number(input.bodyWeight ?? 1.0);
+        const subjectWeight = Number(input.subjectWeight ?? champ.subjectWeight ?? (useRerank ? 3.0 : 2.0));
+        const bodyWeight = Number(input.bodyWeight ?? champ.bodyWeight ?? 1.0);
         const bm25Arr = patterns.map((_, i) =>
           multiFieldBM25(queryTokens, subjectDocs[i], bodyDocs[i], subjectStats, bodyStats, subjectWeight, bodyWeight),
         );
@@ -705,7 +796,7 @@ export const neuralTools: MCPTool[] = [
         // penalty enabled) because some relevant work commits also match the
         // Merge/release regex. Callers wanting aggressive meta-commit
         // suppression can set {typePenaltyFactor: 0.5}.
-        const typeFactor = Number(input.typePenaltyFactor ?? 1.0);
+        const typeFactor = Number(input.typePenaltyFactor ?? champ.typePenaltyFactor ?? 1.0);
         const hybridArr = typeFactor === 1.0
           ? baseHybrid
           : baseHybrid.map((s, i) => s * typePenalty(patterns[i].name, typeFactor));

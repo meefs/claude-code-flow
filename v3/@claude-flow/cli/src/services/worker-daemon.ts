@@ -45,7 +45,8 @@ export type WorkerType =
   | 'refactor'
   | 'benchmark'
   | 'testgaps'
-  | 'backup';
+  | 'backup'
+  | 'harness';
 
 interface WorkerConfig {
   type: WorkerType;
@@ -122,6 +123,7 @@ const DEFAULT_WORKERS: WorkerConfigInternal[] = [
   { type: 'consolidate', intervalMs: 30 * 60 * 1000, offsetMs: 6 * 60 * 1000, priority: 'low', description: 'Memory distillation (ADR-174)', enabled: true },
   { type: 'testgaps', intervalMs: 20 * 60 * 1000, offsetMs: 8 * 60 * 1000, priority: 'normal', description: 'Test coverage analysis', enabled: true },
   { type: 'backup', intervalMs: 24 * 60 * 60 * 1000, offsetMs: 10 * 60 * 1000, priority: 'low', description: 'Nightly memory DB backup (WAL-safe, rotated)', enabled: true },
+  { type: 'harness', intervalMs: 6 * 60 * 60 * 1000, offsetMs: 12 * 60 * 1000, priority: 'low', description: 'Self-optimizing harness loop (opt-in RUFLO_HARNESS_LOOP, $0-default)', enabled: true },
   { type: 'predict', intervalMs: 10 * 60 * 1000, offsetMs: 0, priority: 'low', description: 'Predictive preloading', enabled: false },
   { type: 'document', intervalMs: 60 * 60 * 1000, offsetMs: 0, priority: 'low', description: 'Auto-documentation', enabled: false },
 ];
@@ -1317,6 +1319,8 @@ export class WorkerDaemon extends EventEmitter {
         return this.runConsolidateWorker();
       case 'backup':
         return this.runBackupWorker();
+      case 'harness':
+        return this.runHarnessWorker();
       case 'testgaps':
         return this.runTestGapsWorkerLocal();
       case 'predict':
@@ -1615,6 +1619,44 @@ export class WorkerDaemon extends EventEmitter {
     }
 
     writeFileSync(backupFile, JSON.stringify(result, null, 2));
+    return result;
+  }
+
+  /**
+   * Self-optimizing harness loop worker (ADR-176 phase 8). Strictly bounded:
+   * OPT-IN (RUFLO_HARNESS_LOOP), $0-default (no optimizer/verifier wired => no
+   * promotion), trajectory-capped, single-flight via the daemon, never throws.
+   * On acceptance the (unsigned) champion is staged for the separate sign step.
+   */
+  private async runHarnessWorker(): Promise<unknown> {
+    const metricsDir = join(this.projectRoot, '.claude-flow', 'metrics');
+    if (!existsSync(metricsDir)) mkdirSync(metricsDir, { recursive: true });
+    const harnessFile = join(metricsDir, 'harness-loop.json');
+
+    let result: Record<string, unknown>;
+    try {
+      // ADR-176 flywheel (A-P3b autonomy loop): run ONE COMPOUNDING generation
+      // on the install's REAL data — read the persisted champion as baseline,
+      // gate a constrained candidate on the frozen self-supervised held-out with
+      // the human-anchor guard + separate canary, and on a verified promotion
+      // advance the champion so the NEXT tick compounds. Shadow-first (serve lags
+      // one tick). Opt-in ($0 no-op without RUFLO_HARNESS_LOOP).
+      const { runFlywheelGenerationWorker } = await import('./harness-flywheel-runtime.js');
+      const gen = await runFlywheelGenerationWorker(this.projectRoot, { sample: 120 });
+      let status: unknown = null;
+      try {
+        const { flywheelStatus } = await import('./harness-flywheel-generations.js');
+        status = flywheelStatus(this.projectRoot);
+      } catch { /* no lineage yet */ }
+      if (gen.promoted) this.log('info', `Flywheel gen ${gen.generation}: PROMOTED (+${(gen.delta ?? 0).toFixed(4)} held-out, significant=${gen.significant}) — champion advanced`);
+      result = { timestamp: new Date().toISOString(), flywheel: gen, lineage: status };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.log('warn', `Harness worker failed: ${message}`);
+      result = { timestamp: new Date().toISOString(), ran: false, error: message };
+    }
+
+    writeFileSync(harnessFile, JSON.stringify(result, null, 2));
     return result;
   }
 
