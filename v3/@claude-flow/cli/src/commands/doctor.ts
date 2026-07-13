@@ -154,8 +154,10 @@ async function checkConfigFile(): Promise<HealthCheck> {
  * the broken commands).
  */
 async function checkStaleSettingsNpx(): Promise<HealthCheck> {
-  // Same regex pattern the executor migration uses — kept in sync.
-  const BROKEN_RE = /npx\s+(?:--?\S+\s+)*@?claude-flow\/cli@latest\s+hooks\s+(?:statusline|\S+)/;
+  // Same regex pattern the executor migration uses — kept in sync. Flag-list
+  // repetition bounded at 10 (CodeQL js/redos — unbounded `*` here is
+  // exponential-backtracking-prone on a crafted settings.json).
+  const BROKEN_RE = /npx\s+(?:--?\S+\s+){0,10}@?claude-flow\/cli@latest\s+hooks\s+(?:statusline|\S+)/;
 
   // Look in both project-local and home-dir settings.
   const candidates = [
@@ -765,6 +767,77 @@ async function checkVersionFreshness(): Promise<HealthCheck> {
  *   - plugins/ruflo-metaharness/skills/harness-similarity/SKILL.md
  *   - plugins/ruflo-metaharness/skills/harness-drift-from-history/SKILL.md  (iter 53)
  */
+/**
+ * ADR-305 — funnel state audit. Reports the effective enabled/disabled
+ * state and, critically for enterprise audit verification, WHICH
+ * precedence source decided it (env > enterprise > user > default).
+ * Informational: both states are `pass`; only a resolver failure warns.
+ */
+async function checkFunnel(): Promise<HealthCheck> {
+  try {
+    const { resolveFunnelEnabled, getDisclosure } = await import('../funnel/index.js');
+    const decision = resolveFunnelEnabled();
+    const disclosure = getDisclosure();
+    return {
+      name: 'Funnel (ADR-305)',
+      status: 'pass',
+      message: `${decision.enabled ? 'enabled' : 'disabled'} (decided by: ${decision.decidedBy}; disclosure: ${disclosure.state})`,
+    };
+  } catch (err) {
+    return {
+      name: 'Funnel (ADR-305)',
+      status: 'warn',
+      message: `state unreadable: ${err instanceof Error ? err.message : String(err)}`,
+      fix: 'ruflo funnel status',
+    };
+  }
+}
+
+/** Meta LLM Proxy — sponsored-downtime health (ADR-313). */
+async function checkProxy(): Promise<HealthCheck> {
+  try {
+    const { funnelStateDir, hasConsent, readRateLimitStatus, lastRecordedEvent } = await import('../funnel/index.js');
+    const dir = funnelStateDir();
+    const installed = existsSync(join(dir, 'proxy-token'));
+    const consented = hasConsent('sponsored-downtime');
+    const rateLimited = readRateLimitStatus();
+    const lastExhausted = lastRecordedEvent('sponsor_capacity_exhausted');
+
+    if (!installed) {
+      return {
+        name: 'Meta LLM Proxy (ADR-313)',
+        status: 'warn',
+        message: 'not installed — no proxy-token found; sponsored-downtime capacity is unavailable',
+        fix: 'See cognitum-one/meta-proxy (private) for install instructions',
+      };
+    }
+
+    const parts = [
+      `sponsored consent: ${consented ? 'granted' : 'not granted'}`,
+      `rate-limit flag: ${rateLimited.limited ? `set (since ${rateLimited.since})` : 'not set'}`,
+    ];
+    if (lastExhausted) parts.push(`last capacity-exhausted: ${lastExhausted}`);
+
+    if (rateLimited.limited && !consented) {
+      return {
+        name: 'Meta LLM Proxy (ADR-313)',
+        status: 'warn',
+        message: `${parts.join('; ')} — flagged rate-limited but sponsored capacity isn't enabled`,
+        fix: 'ruflo proxy sponsor-enable --yes',
+      };
+    }
+
+    return { name: 'Meta LLM Proxy (ADR-313)', status: 'pass', message: parts.join('; ') };
+  } catch (err) {
+    return {
+      name: 'Meta LLM Proxy (ADR-313)',
+      status: 'warn',
+      message: `state unreadable: ${err instanceof Error ? err.message : String(err)}`,
+      fix: 'ruflo proxy sponsor-status',
+    };
+  }
+}
+
 async function checkMetaharnessIntegration(): Promise<HealthCheck> {
   // Locate plugins dir.
   //
@@ -1149,7 +1222,7 @@ export const doctorCommand: Command = {
     {
       name: 'component',
       short: 'c',
-      description: 'Check specific component (version, node, npm, config, daemon, memory, api, git, mcp, claude, disk, typescript, agentic-flow, encryption, federation, metaharness)',
+      description: 'Check specific component (version, node, npm, config, daemon, memory, api, git, mcp, claude, disk, typescript, agentic-flow, encryption, federation, funnel, proxy, metaharness)',
       type: 'string'
     },
     {
@@ -1201,6 +1274,8 @@ export const doctorCommand: Command = {
       checkFederationBreaker, // ADR-097 Phase 4
       checkMetaharness, // ADR-150 — MetaHarness upstream package
       checkMetaharnessIntegration, // iter 45 — ruflo-side integration layer
+      checkFunnel, // ADR-305 — effective funnel state + deciding precedence source
+      checkProxy, // ADR-313 — Meta LLM Proxy sponsored-downtime health
     ];
 
     const componentMap: Record<string, () => Promise<HealthCheck>> = {
@@ -1226,6 +1301,8 @@ export const doctorCommand: Command = {
       'federation': checkFederationBreaker, // ADR-097 Phase 4
       'metaharness': checkMetaharness, // ADR-150 — upstream package
       'metaharness-integration': checkMetaharnessIntegration, // iter 45 — ruflo-side
+      'funnel': checkFunnel, // ADR-305
+      'proxy': checkProxy, // ADR-313
     };
 
     let checksToRun = allChecks;
