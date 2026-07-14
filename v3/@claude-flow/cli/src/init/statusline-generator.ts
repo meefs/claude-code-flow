@@ -143,7 +143,20 @@ function resolveCliBinCandidates() {
       }
     } catch { /* ignore */ }
   } catch { /* ignore */ }
-  return candidates.filter((p) => { try { return fs.existsSync(p); } catch { return false; } });
+  return candidates.filter((p) => {
+    try {
+      if (!fs.existsSync(p)) return false;
+      // A candidate's bin/cli.js can exist on disk while its compiled
+      // dist/ never got built (Claude Code's own plugin marketplace just
+      // git-clones the repo — no install/build step — so every marketplace
+      // install is a source-only checkout by construction). Importing
+      // dist/src/index.js from bin/cli.js then throws MODULE_NOT_FOUND on
+      // every real command; only --version happens to survive it. Check
+      // for the compiled entrypoint too so a doomed candidate is skipped
+      // up front instead of wasting a spawn-and-fail on every render.
+      return fs.existsSync(path.join(path.dirname(p), '..', 'dist', 'src', 'index.js'));
+    } catch { return false; }
+  });
 }
 
 // Return { fresh, promoFresh, data }. 'fresh' is true only if within the TTL

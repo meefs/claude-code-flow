@@ -31,6 +31,35 @@ describe('hook-handler.cjs — root/package artifact parity', () => {
   });
 });
 
+describe('hook-handler.cjs — resolveCliBinForHook validates a real dist, not just bin/cli.js', () => {
+  // Claude Code's own plugin marketplace mechanism installs by git clone/pull
+  // with no build step, so ~/.claude/plugins/marketplaces/ruflo is a
+  // source-only checkout by construction: bin/cli.js exists on disk, but
+  // importing dist/src/index.js from it throws MODULE_NOT_FOUND on every
+  // real command (confirmed live — only --version happens to survive it).
+  // Before this fix, resolveCliBinForHook() picked that doomed candidate and
+  // spawnDetachedFunnelRefresh()/spawnDetachedAdvisorRefresh() had no
+  // fallback, so a marketplace install's promo/advisor refresh silently
+  // never fired, on any OS.
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const rootArtifact = path.resolve(here, '../../../../.claude/helpers/hook-handler.cjs');
+  const pkgArtifact = path.resolve(here, '../.claude/helpers/hook-handler.cjs');
+  const source = readFileSync(existsSync(rootArtifact) ? rootArtifact : pkgArtifact, 'utf-8');
+
+  it('checks for a compiled dist/src/index.js before trusting a candidate', () => {
+    expect(source).toContain("path.join(path.dirname(p), '..', 'dist', 'src', 'index.js')");
+  });
+
+  it('falls back to npx (not a silent no-op) when no local candidate has a real dist', () => {
+    const idx = source.indexOf('function spawnDetachedHookRefresh');
+    expect(idx).toBeGreaterThan(-1);
+    const body = source.slice(idx, idx + 700);
+    expect(body).toContain('@claude-flow/cli');
+    expect(body).toContain('--prefer-offline');
+    expect(body).not.toContain('if (!cliBin) return;');
+  });
+});
+
 describe('generateHookHandler() fallback — funnel refresh wiring (#2661-adjacent)', () => {
   // Unlike the committed .cjs artifacts above, this fallback IS generated
   // from generateHookHandler() directly — it's the inline template used

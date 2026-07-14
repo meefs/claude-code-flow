@@ -656,6 +656,18 @@ describe('generated statusline promo row', () => {
     // Default branch stays a renderer-owned color, not a payload field.
     expect(script).toMatch(/: c\.brightCyan/);
   });
+
+  it('validates a resolved CLI bin candidate actually has a compiled dist, not just a bin/cli.js on disk', () => {
+    // Claude Code's own plugin marketplace mechanism installs by git clone/pull
+    // with no build step, so ~/.claude/plugins/marketplaces/ruflo is a
+    // source-only checkout by construction: bin/cli.js exists but importing
+    // dist/src/index.js throws MODULE_NOT_FOUND on every real command
+    // (confirmed live). Without checking for the compiled entrypoint too,
+    // resolveCliBinCandidates() picked that doomed candidate every render and
+    // wasted the render's time budget failing before ever reaching the npx
+    // fallback — starving both the promo row and its 20s rotation clock.
+    expect(script).toContain("path.join(path.dirname(p), '..', 'dist', 'src', 'index.js')");
+  });
 });
 
 // ─── ADR-301/305 attribution — network-free fallback discipline ─────────────
