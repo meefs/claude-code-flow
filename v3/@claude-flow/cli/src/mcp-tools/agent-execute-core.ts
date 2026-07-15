@@ -69,13 +69,15 @@ function saveAgentStore(store: AgentStore): void {
 // #1906/#2232 — Current model ids (Claude 4.x family):
 //   Opus 4.8    → claude-opus-4-8   (current, the `opus` alias)
 //   Opus 4.7    → claude-opus-4-7   (prior pin, reachable via `opus-4.7`)
-//   Sonnet 4.6  → claude-sonnet-4-6
+//   Sonnet 5    → claude-sonnet-5   (current, the `sonnet` alias)
+//   Sonnet 4.6  → claude-sonnet-4-6 (prior pin, reachable via `sonnet-4.6`)
 //   Haiku 4.5   → claude-haiku-4-5-20251001
-// `inherit` and the various defaults below all map to Sonnet 4.6.
-export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-6';
+// `inherit` and the various defaults below all map to Sonnet 5.
+export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-5';
 const MODEL_MAP: Record<string, string> = {
   haiku: 'claude-haiku-4-5-20251001',
-  sonnet: 'claude-sonnet-4-6',
+  sonnet: 'claude-sonnet-5',
+  'sonnet-4.6': 'claude-sonnet-4-6',
   opus: 'claude-opus-4-8',
   'opus-4.7': 'claude-opus-4-7',
   inherit: DEFAULT_ANTHROPIC_MODEL,
