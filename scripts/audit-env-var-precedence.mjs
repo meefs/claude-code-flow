@@ -59,6 +59,7 @@ const KNOWN_ESCAPE_HATCHES = new Set([
   'RUFLO_FUNNEL',                 // Read inside the generated hook-handler.cjs (ADR-312/313 rate-limit nudge), not a typed CLI invocation — no command surface to attach a flag to
   'RUFLO_STATUSLINE_HYPERLINKS',  // Terminal-capability opt-out for OSC 8 hyperlinks in the statusline hook, same pattern as NO_COLOR — the statusline runs as a hook script, never a user-typed CLI command
   'RUFLO_STATUSLINE_HYPERLINKS_TMUX', // Opt-in override of the tmux OSC 8 mangling workaround above — same hook-script context, no CLI surface
+  'RUFLO_STATUSLINE_IDENTITY',    // Hook-only display mode (`project` default, `author` compatibility); statusline has no interactive CLI surface
   'RUFLO_ADVISOR_MAX_BUDGET_USD', // Advisor-tip spend cap read from generated hook code (funnel/advisor-tip.ts) — background nudge, no CLI invocation to attach a flag to
   'RUFLO_FUNNEL_CLICK_ENDPOINT',    // Staging/self-hosted override for the funnel click-redirect endpoint — deployment config, not a per-invocation CLI flag
   'RUFLO_FUNNEL_EVENTS_ENDPOINT',   // Staging/self-hosted override for the funnel events endpoint — same deployment-config pattern as CLICK_ENDPOINT above
