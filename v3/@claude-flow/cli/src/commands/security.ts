@@ -8,6 +8,7 @@
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { output } from '../output.js';
 import { execSync } from 'node:child_process';
+import { createBuiltinAIDefence, type DefenceEngine } from '../security/builtin-aidefence.js';
 
 // Scan subcommand
 const scanCommand: Command = {
@@ -892,16 +893,16 @@ const defendCommand: Command = {
     output.writeln(output.dim('─'.repeat(55)));
 
     // Dynamic import of aidefence (allows package to be optional)
-    let createAIDefence: typeof import('@claude-flow/aidefence').createAIDefence;
+    let defender: DefenceEngine;
     try {
       const aidefence = await import('@claude-flow/aidefence');
-      createAIDefence = aidefence.createAIDefence;
+      defender = aidefence.createAIDefence({ enableLearning }) as DefenceEngine;
     } catch {
-      output.printError('AIDefence package not installed', 'Run: npm install @claude-flow/aidefence');
-      return { success: false, exitCode: 2, message: 'AIDefence not available' };
+      // Keep cold npx startup lean (#2561): the full learning engine remains
+      // user-installable, while the CLI always ships a deterministic scanner.
+      defender = createBuiltinAIDefence();
+      output.writeln(output.dim('Using built-in defense engine (install @claude-flow/aidefence for adaptive learning)'));
     }
-
-    const defender = createAIDefence({ enableLearning });
 
     // Show stats mode
     if (showStats) {
@@ -998,7 +999,7 @@ const defendCommand: Command = {
         if (criticalThreats.length > 0 && enableLearning) {
           output.writeln(output.bold('Recommended Mitigations:'));
           for (const threat of criticalThreats) {
-            const mitigation = await defender.getBestMitigation(threat.type as Parameters<typeof defender.getBestMitigation>[0]);
+            const mitigation = await defender.getBestMitigation(threat.type);
             if (mitigation) {
               output.writeln(`  ${threat.type}: ${output.bold(mitigation.strategy)} (${(mitigation.effectiveness * 100).toFixed(0)}% effective)`);
             }
