@@ -24,6 +24,7 @@ afterEach(() => {
 const sources: ReadonlyArray<readonly [string, () => string | null, string | null]> = [
   ['package', () => null, resolve(here, '../.claude/helpers/session.cjs')],
   ['repository', () => null, resolve(here, '../../../../.claude/helpers/session.cjs')],
+  ['@claude-flow/mcp repository', () => null, resolve(here, '../../mcp/.claude/helpers/session.js')],
   ['generated', generateSessionManager, null],
   ['generated cross-platform', generateCrossPlatformSessionManager, null],
 ];
