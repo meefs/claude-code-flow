@@ -105,6 +105,15 @@ describe('session helper keeps writes inside the project session dir', () => {
         expect(readdirSync(f.outside)).toEqual([]);
       });
 
+      it('creates nothing outside the project when .claude-flow is a symlink', () => {
+        const f = fixture(generate, source);
+        symlinkSync(f.outside, join(f.project, '.claude-flow'), 'dir');
+
+        run(f, 'start');
+
+        expect(readdirSync(f.outside)).toEqual([]);
+      });
+
       it('keeps the normal start / restore / end lifecycle working', () => {
         const f = fixture(generate, source);
         mkdirSync(join(f.project, '.claude-flow'), { recursive: true });

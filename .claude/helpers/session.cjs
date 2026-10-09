@@ -50,7 +50,16 @@ function archiveId(id) {
 function assertSessionDirContained() {
   if (SESSION_DIR !== path.join(process.cwd(), '.claude-flow', 'sessions')) return;
   const root = fs.realpathSync(process.cwd());
-  const rel = path.relative(root, fs.realpathSync(SESSION_DIR));
+  // Resolve the deepest part of the path that exists (lstat: a symlink counts),
+  // so a symlinked .claude-flow is refused before anything is created under it.
+  let dir = SESSION_DIR;
+  for (;;) {
+    try { fs.lstatSync(dir); break; } catch { /* not created yet */ }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  const rel = path.relative(root, fs.realpathSync(dir));
   if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
     throw new Error('Session directory resolves outside the project');
   }
@@ -73,6 +82,7 @@ function ensureDir(dir) {
 
 const commands = {
   start: () => {
+    assertSessionDirContained();
     ensureDir(SESSION_DIR);
     const sessionId = `session-${Date.now()}`;
     const session = {

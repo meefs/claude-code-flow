@@ -27,7 +27,16 @@ function archiveId(id) {
 // The session directory must resolve inside the project (no symlinked escape).
 function assertSessionDirContained() {
   const root = fs.realpathSync(process.cwd());
-  const rel = path.relative(root, fs.realpathSync(SESSION_DIR));
+  // Resolve the deepest part of the path that exists (lstat: a symlink counts),
+  // so a symlinked .claude-flow is refused before anything is created under it.
+  let dir = SESSION_DIR;
+  for (;;) {
+    try { fs.lstatSync(dir); break; } catch { /* not created yet */ }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  const rel = path.relative(root, fs.realpathSync(dir));
   if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
     throw new Error('Session directory resolves outside the project');
   }
@@ -66,6 +75,7 @@ const commands = {
       },
     };
 
+    assertSessionDirContained();
     fs.mkdirSync(SESSION_DIR, { recursive: true });
     atomicWrite(SESSION_FILE, JSON.stringify(session, null, 2));
 
