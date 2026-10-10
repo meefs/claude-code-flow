@@ -241,10 +241,15 @@ function getStatuslineData() {
   // intelligence and an empty promo row (the memo cache that keeps the row
   // populated across CLI hiccups is only ever written from a SUCCESSFUL
   // delegation, so it could never get seeded on Windows either).
+  // These command lines go through a shell, so a path the shell would interpret
+  // (a quote, $, backtick, %, !, newline, or a backslash on POSIX) is never
+  // interpolated: the directory name is chosen by whoever made the checkout.
+  const shellSafe = (p) => !/["`$%!\r\n]/.test(p) && (process.platform === 'win32' || !p.includes('\\'));
   const cmds = resolveCliBinCandidates()
+    .filter((bin) => shellSafe(bin) && shellSafe(process.execPath))
     .map((bin) => '"' + process.execPath + '" "' + bin + '" hooks statusline --json')
     // --prefix: npx resolves the package from HELPER_ROOT, not the project.
-    .concat(['npx --prefer-offline --prefix "' + HELPER_ROOT + '" @claude-flow/cli hooks statusline --json']);
+    .concat(shellSafe(HELPER_ROOT) ? ['npx --prefer-offline --prefix "' + HELPER_ROOT + '" @claude-flow/cli hooks statusline --json'] : []);
   for (const cmd of cmds) {
     try {
       const raw = execSync(

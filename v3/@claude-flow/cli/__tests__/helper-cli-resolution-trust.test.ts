@@ -117,6 +117,24 @@ describe('statusline.cjs resolves the CLI from its install root', () => {
     render(helper, home, project, emptyBin);
     expect(existsSync(marker)).toBe(true);
   });
+
+  it('never interpolates a shell-active install-root path into the delegation command', () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'ruflo-cli-trust-')));
+    tempRoots.push(root);
+    const home = join(root, 'home');
+    const injected = join(root, 'injected');
+    // The checkout's directory name is chosen by whoever made it.
+    const project = join(root, `p$(/usr/bin/touch ${injected})`);
+    const emptyBin = join(root, 'empty-bin');
+    mkdirSync(emptyBin);
+    mkdirSync(home, { recursive: true });
+    plantCli(join(project, 'node_modules', '@claude-flow', 'cli'), join(root, 'cli-ran'));
+    const helper = join(project, '.claude', 'helpers', 'statusline.cjs');
+    mkdirSync(dirname(helper), { recursive: true });
+    copyFileSync(source, helper);
+    render(helper, home, project, emptyBin);
+    expect(existsSync(injected)).toBe(false);
+  });
 });
 
 type Shim = {
